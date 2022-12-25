@@ -1,0 +1,161 @@
+dir_saving = getDirectory("Choose a Directory to save");
+dir_processing = getDirectory("Choose a Directory to proess");
+list = getFileList(dir_processing);
+file = File.open(dir_saving + "final_results.txt");
+print("Label","PVMcount","VesselArea","VesselPercentage","PVMcount%Area");
+print(file,"Label\tPVM_total_count\tVesselArea\tVesselPercentage\tcount%vessel");
+for(i = 0; i < list.length; i++) 
+	{
+		open(list[i]);//Open each image
+		name = getTitle();
+		Stack.setDisplayMode("color");
+		Stack.setChannel(1);
+		run("Enhance Contrast", "saturated=0.35");
+		run("Enhance Contrast", "saturated=0.35");
+		setTool("polygon");
+		//makeRectangle(8318, 3642, 2800, 2800);
+		waitForUser("Draw ROI");//1
+		roiManager("Add");
+		roiManager("Select", 0);
+		run("Duplicate...", "duplicate");
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {//split channels
+			if (matches(images[j], ".*-1.tif")) {
+				selectWindow(images[j]);
+			}
+		}
+		roiManager("Add");
+		run("Split Channels");
+		
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {//pre-processing vessel
+			if (matches(images[j], "C1.*")) {
+				selectWindow(images[j]);
+			}
+		}
+		roiManager("Select", 1);
+		setAutoThreshold("Huang dark");
+		run("Convert to Mask");
+		run("Fill Holes");
+		run("Median...", "radius=4");
+		roiManager("Select", 1);
+		setAutoThreshold("Huang dark");
+		run("Measure");
+		saveAs("Results", dir_saving + "vesselarea_" + name + ".csv");
+		per_vessel = getResult("Area");
+		percentage = getResult("%Area");
+		close("Results");
+		for (j = 0; j < images.length; j++) {//pre-processing DAPI
+			if (matches(images[j], "C2.*")) {
+				selectWindow(images[j]);
+			}
+		}
+		roiManager("Select", 1);
+		setAutoThreshold("Li dark");
+		run("Convert to Mask");
+		run("Fill Holes");
+		run("Maximum...", "radius=0.5");
+		run("Median...", "radius=4");
+		
+		for (j = 0; j < images.length; j++) {//pre-processing PVM
+			if (matches(images[j], "C3.*")) {
+				selectWindow(images[j]);
+				PVM=images[j];
+			}
+		}
+		roiManager("Select", 1);
+		setAutoThreshold("Moments dark");
+		run("Convert to Mask");
+		run("Median...", "radius=4");
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {
+			if (matches(images[j], "Mask.*")) {
+				selectWindow(images[j]);
+			}
+		}
+		
+		
+		
+		run("Watershed Irregular Features", "erosion=8 convexity_threshold=0 separator_size=10-Infinity");
+		run("Analyze Particles...", "size=200-Infinity show=Masks exclude");
+		run("Invert LUT");
+		setForegroundColor(0, 0, 0);
+		setBackgroundColor(255, 255, 255);
+		waitForUser("Use brush to remove artefacts");//2
+		setForegroundColor(255, 255, 255);
+		setBackgroundColor(0, 0, 0);
+		for (j = 0; j < images.length; j++) {
+			if (matches(images[j], "Mask.*")) {
+				selectWindow(images[j]);
+			}
+		}
+		//Calculate co-labeled cells
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {
+			if (matches(images[j], "Mask.*")) {
+				Mask = images[j];
+			}
+			if (matches(images[j], "C2.*")) {
+				DAPI = images[j];
+			}
+			if (matches(images[j], "C1.*")) {
+				CD31 = images[j];
+			}
+		}
+		run("Binary Feature Extractor", "objects=[" + Mask +"] selector=[" + DAPI + "] object_overlap=0");
+		
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {
+			if (matches(images[j], "Extracted.*")) {
+				selectWindow(images[j]);
+				Extracted = images[j];
+			}
+		}
+		run("Binary Feature Extractor", "objects=[" + Extracted +"] selector=[" + CD31 + "] object_overlap=50");
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {
+			if (matches(images[j], "Extracted_.*")) {
+				selectWindow(images[j]);
+				ExtractedEX = images[j];
+			}
+		}
+		selectWindow(name);
+		run("Duplicate...", " ");
+		roiManager("Add");
+		close();
+		selectWindow(ExtractedEX);
+		roiManager("Select", 0);
+		run("Analyze Particles...", "exclude clear summarize overlay");
+		selectWindow(ExtractedEX);
+		run("Add Selection...");
+		close("C1*");
+		close("C2*");
+		close("C3*");
+		selectWindow(name);
+		run("Duplicate...", "duplicate");
+		images = getList("image.titles");
+		for (j = 0; j < images.length; j++) {//split channels
+			if (matches(images[j], ".*-1.tif")) {
+				selectWindow(images[j]);
+			}
+		}
+		run("Split Channels");
+		run("Merge Channels...", "c1=[" + CD31 +"] c2=[" + DAPI +"] c3=[" + PVM +"] c4=[" + ExtractedEX +"] create ignore");
+		Stack.setDisplayMode("color");
+		Stack.setChannel(4);
+		roiManager("Select", 0);
+		run("Analyze Particles...", "exclude clear summarize overlay slice");
+		roiManager("Select", 0);
+		run("Add Selection...");
+		saveAs("Results", dir_saving + "PVMcount_" + name + ".csv");
+		IJ.renameResults("Results");
+		pvm_count = getResult("Count");
+		run("Close");
+		saveAs("tiff", dir_saving + "results_" + name);
+		per_count = pvm_count * 1000000 / per_vessel;
+		print(name,pvm_count,per_vessel,percentage,per_count);
+		print(file,name + "\t" + pvm_count + "\t" + per_vessel + "\t" + percentage + "\t" + per_count);
+		roiManager("deselect");
+		roiManager("delete");
+		close("*");
+	}
